@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>自動メンバー分けツール</title>
+  <style>
+    :root {
+      --bg-color: #f4f7f6;
+      --card-bg: #ffffff;
+      --primary: #4a90e2;
+      --danger: #e74c3c;
+      --text: #333333;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text);
+      margin: 0;
+      padding: 16px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h1 { text-align: center; color: #2c3e50; font-size: 1.5rem; }
+    .card {
+      background: var(--card-bg);
+      padding: 16px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 16px;
+    }
+    h2 { font-size: 1.1rem; margin-top: 0; border-bottom: 2px solid #f0f0f0; padding-bottom: 8px; }
+    textarea, input, select, button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 8px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      box-sizing: border-box;
+      font-size: 1rem;
+    }
+    button {
+      background-color: var(--primary);
+      color: white;
+      border: none;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 12px;
+    }
+    button:hover { opacity: 0.9; }
+    .btn-danger { background-color: var(--danger); }
+    .btn-secondary { background-color: #7f8c8d; }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
+    .rule-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      background: #f9f9f9;
+      padding: 8px;
+      border-radius: 6px;
+    }
+    .rule-item select { margin-top: 0; }
+    .rule-item button { width: auto; margin-top: 0; padding: 6px 12px; }
+    .error { color: var(--danger); font-weight: bold; margin-top: 8px; font-size: 0.9rem; }
+    
+    .teams-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .team-card {
+      border-radius: 8px;
+      padding: 12px;
+      color: #333;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    .team-header {
+      font-weight: bold;
+      border-bottom: 1px solid rgba(0,0,0,0.1);
+      padding-bottom: 4px;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .team-members { list-style: none; padding: 0; margin: 0; }
+    .team-members li { padding: 4px 0; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>🎲 自動メンバー分けツール</h1>
+
+  <!-- メンバー管理 -->
+  <div class="card">
+    <h2>1. メンバー入力（改行区切り）</h2>
+    <textarea id="memberInput" rows="5" placeholder="佐藤&#10;鈴木&#10;高橋&#10;田中"></textarea>
+    <div id="memberCount" style="text-align: right; font-size: 0.85rem; color: #666;">現在の人数: 0人</div>
+  </div>
+
+  <!-- チーム設定 -->
+  <div class="card">
+    <h2>2. チーム設定</h2>
+    <div class="row">
+      <div>
+        <label>分け方</label>
+        <select id="splitMode">
+          <option value="count">チーム数を指定</option>
+          <option value="size">1チームの人数を指定</option>
+        </select>
+      </div>
+      <div>
+        <label id="splitValueLabel">チーム数</label>
+        <input type="number" id="splitValue" value="2" min="1">
+      </div>
+    </div>
+  </div>
+
+  <!-- 条件設定 -->
+  <div class="card">
+    <h2>3. 条件指定</h2>
+    <div id="rulesContainer"></div>
+    <div class="row">
+      <button type="button" class="btn-secondary" onclick="addRule('SAME')">＋ 同じチームにする</button>
+      <button type="button" class="btn-secondary" onclick="addRule('DIFFERENT')">＋ 別チームにする</button>
+    </div>
+    <div id="errorMessage" class="error"></div>
+  </div>
+
+  <!-- 実行ボタン -->
+  <button onclick="generateTeams()" style="font-size: 1.2rem; padding: 12px;">チームを分ける！</button>
+
+  <!-- 結果表示 -->
+  <div class="card" id="resultCard" style="display:none; margin-top: 20px;">
+    <h2>4. 結果</h2>
+    <div class="row">
+      <button onclick="generateTeams()">🔄 再抽選</button>
+      <button class="btn-secondary" onclick="copyResults()">📋 結果をコピー</button>
+    </div>
+    <div id="teamsDisplay" class="teams-grid"></div>
+  </div>
+</div>
+
+<script>
+  let rules = [];
+  let previousPairs = new Set();
+  const teamColors = ['#E3F2FD', '#FFEBEE', '#E8F5E9', '#FFF3E0', '#F3E5F5', '#E0F7FA', '#FFFDE7'];
+
+  document.getElementById('memberInput').addEventListener('input', (e) => {
+    const members = getMemberList();
+    document.getElementById('memberCount').innerText = `現在の人数: ${members.length}人`;
+    updateRuleDropdowns();
+  });
+
+  document.getElementById('splitMode').addEventListener('change', (e) => {
+    const label = document.getElementById('splitValueLabel');
+    label.innerText = e.target.value === 'count' ? 'チーム数' : '1チームの人数';
+  });
+
+  function getMemberList() {
+    return document.getElementById('memberInput').value
+      .split('\n')
+      .map(name => name.trim())
+      .filter(name => name.length > 0);
+  }
+
+  function addRule(type) {
+    rules.push({ type, p1: '', p2: '' });
+    renderRules();
+  }
+
+  function removeRule(index) {
+    rules.splice(index, 1);
+    renderRules();
+  }
+
+  function renderRules() {
+    const container = document.getElementById('rulesContainer');
+    const members = getMemberList();
+    container.innerHTML = '';
+
+    rules.forEach((rule, index) => {
+      const div = document.createElement('div');
+      div.className = 'rule-item';
+      
+      const typeText = rule.type === 'SAME' ? '🤝 同じチーム' : '⚡ 別チーム';
+      
+      div.innerHTML = `
+        <span style="font-weight:bold; width:100px;">${typeText}</span>
+        <select onchange="rules[${index}].p1 = this.value">${getOptionsHtml(members, rule.p1)}</select>
+        <span>と</span>
+        <select onchange="rules[${index}].p2 = this.value">${getOptionsHtml(members, rule.p2)}</select>
+        <button class="btn-danger" onclick="removeRule(${index})">削除</button>
+      `;
+      container.appendChild(div);
+    });
+  }
+
+  function getOptionsHtml(members, selectedValue) {
+    let html = '<option value="">選択してください</option>';
+    members.forEach(m => {
+      html += `<option value="${m}" ${m === selectedValue ? 'selected' : ''}>${m}</option>`;
+    });
+    return html;
+  }
+
+  function updateRuleDropdowns() {
+    renderRules();
+  }
+
+  function checkContradictions() {
+    for (let r of rules) {
+      if (!r.p1 || !r.p2) continue;
+      if (r.p1 === r.p2) return `「${r.p1}」さんが自分自身と条件指定されています。`;
+    }
+    
+    for (let i = 0; i < rules.length; i++) {
+      for (let j = i + 1; j < rules.length; j++) {
+        const r1 = rules[i];
+        const r2 = rules[j];
+        const samePair = (r1.p1 === r2.p1 && r1.p2 === r2.p2) || (r1.p1 === r2.p2 && r1.p2 === r2.p1);
+        if (samePair && r1.type !== r2.type) {
+          return `「${r1.p1}」さんと「${r1.p2}」さんに矛盾する条件が設定されています。`;
+        }
+      }
+    }
+    return null;
+  }
+
+  function generateTeams() {
+    const members = getMemberList();
+    const errorEl = document.getElementById('errorMessage');
+    errorEl.innerText = '';
+
+    if (members.length === 0) {
+      errorEl.innerText = 'メンバーを入力してください。';
+      return;
+    }
+
+    const contradiction = checkContradictions();
+    if (contradiction) {
+      errorEl.innerText = contradiction;
+      return;
+    }
+
+    const mode = document.getElementById('splitMode').value;
+    const val = parseInt(document.getElementById('splitValue').value, 10);
+    let numTeams = mode === 'count' ? val : Math.ceil(members.length / val);
+    
+    if (numTeams <= 0) numTeams = 1;
+    if (numTeams > members.length) numTeams = members.length;
+
+    let bestResult = null;
+    let minHistoryScore = Infinity;
+
+    for (let attempt = 0; attempt < 500; attempt++) {
+      const shuffled = [...members].sort(() => Math.random() - 0.5);
+      const teams = Array.from({ length: numTeams }, () => []);
+
+      shuffled.forEach((m, idx) => {
+        teams[idx % numTeams].push(m);
+      });
+
+      if (!isValidAssignment(teams)) continue;
+
+      const historyScore = calculateHistoryScore(teams);
+      if (historyScore < minHistoryScore) {
+        minHistoryScore = historyScore;
+        bestResult = teams;
+        if (historyScore === 0) break;
+      }
+    }
+
+    if (!bestResult) {
+      errorEl.innerText = '条件を満たす組み分けが見つかりませんでした。条件をゆるめて再試行してください。';
+      return;
+    }
+
+    saveCurrentPairs(bestResult);
+    displayResults(bestResult);
+  }
+
+  function isValidAssignment(teams) {
+    for (let r of rules) {
+      if (!r.p1 || !r.p2) continue;
+      const t1 = teams.findIndex(t => t.includes(r.p1));
+      const t2 = teams.findIndex(t => t.includes(r.p2));
+
+      if (r.type === 'SAME' && t1 !== t2) return false;
+      if (r.type === 'DIFFERENT' && t1 === t2) return false;
+    }
+    return true;
+  }
+
+  function calculateHistoryScore(teams) {
+    let score = 0;
+    teams.forEach(team => {
+      for (let i = 0; i < team.length; i++) {
+        for (let j = i + 1; j < team.length; j++) {
+          const pairKey = [team[i], team[j]].sort().join('___');
+          if (previousPairs.has(pairKey)) score++;
+        }
+      }
+    });
+    return score;
+  }
+
+  function saveCurrentPairs(teams) {
+    previousPairs.clear();
+    teams.forEach(team => {
+      for (let i = 0; i < team.length; i++) {
+        for (let j = i + 1; j < team.length; j++) {
+          const pairKey = [team[i], team[j]].sort().join('___');
+          previousPairs.add(pairKey);
+        }
+      }
+    });
+  }
+
+  function displayResults(teams) {
+    const container = document.getElementById('teamsDisplay');
+    container.innerHTML = '';
+
+    teams.forEach((idx_team) => {
+      // index parameter fix
+    });
+    
+    teams.forEach((team, idx) => {
+      const card = document.createElement('div');
+      card.className = 'team-card';
+      card.style.backgroundColor = teamColors[idx % teamColors.length];
+
+      const header = `<div class="team-header"><span>チーム ${idx + 1}</span><span>${team.length}人</span></div>`;
+      const list = `<ul class="team-members">${team.map(m => `<li>${m}</li>`).join('')}</ul>`;
+
+      card.innerHTML = header + list;
+      container.appendChild(card);
+    });
+
+    document.getElementById('resultCard').style.display = 'block';
+  }
+
+  function copyResults() {
+    const teams = Array.from(document.querySelectorAll('.team-card'));
+    let text = "【チーム分け結果】\n\n";
+
+    teams.forEach((card, idx) => {
+      const name = card.querySelector('.team-header span').innerText;
+      const members = Array.from(card.querySelectorAll('li')).map(li => li.innerText).join(', ');
+      text += `■ ${name}\n${members}\n\n`;
+    });
+
+    navigator.clipboard.writeText(text).then(() => {
+      alert('結果をクリップボードにコピーしました！');
+    });
+  }
+</script>
+</body>
+</html>
