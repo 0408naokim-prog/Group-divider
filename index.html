@@ -31,7 +31,7 @@
       margin-bottom: 16px;
     }
     h2 { font-size: 1rem; margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 6px; }
-    textarea, input, button {
+    textarea, input, select, button {
       width: 100%; padding: 10px; border-radius: 6px;
       border: 1px solid #ccc; box-sizing: border-box; font-size: 0.95rem;
     }
@@ -39,11 +39,16 @@
     button:hover { opacity: 0.9; }
     .btn-secondary { background: #95a5a6; }
     
-    .setting-group {
+    .setting-row {
+      display: flex;
+      gap: 12px;
       margin-top: 10px;
     }
+    .setting-group {
+      flex: 1;
+    }
     .setting-group label {
-      font-size: 0.9rem;
+      font-size: 0.85rem;
       font-weight: bold;
       color: #555;
       display: block;
@@ -91,14 +96,24 @@
     <textarea id="memberInput" rows="6" placeholder="メンバー名を改行区切りで入力..."></textarea>
     <div id="memberCount" style="text-align: right; font-size: 0.85rem; color: #666; margin-top: 4px;">現在の人数: 0人</div>
     
-    <div class="setting-group">
-      <label for="teamSizeInput">1チームの人数</label>
-      <input type="number" id="teamSizeInput" value="3" min="1" max="20">
+    <div class="setting-row">
+      <div class="setting-group">
+        <label for="teamPairSelect">対戦数（組数）</label>
+        <select id="teamPairSelect">
+          <option value="1">1組（2チーム）</option>
+          <option value="2">2組（4チーム）</option>
+          <option value="3">3組（6チーム）</option>
+        </select>
+      </div>
+      <div class="setting-group">
+        <label for="teamSizeInput">1チームの人数</label>
+        <input type="number" id="teamSizeInput" value="3" min="1" max="20">
+      </div>
     </div>
   </div>
 
   <!-- チーム分け実行 -->
-  <button onclick="generateTeams()" style="font-size: 1.1rem; padding: 12px;">🎲 チームを作成する！</button>
+  <button onclick="generateTeams()" style="font-size: 1.1rem; padding: 12px; margin-top: 4px;">🎲 チームを作成する！</button>
   <div id="errorMessage" class="error-msg"></div>
 
   <!-- 結果表示 -->
@@ -120,7 +135,7 @@
 <script>
   let previousPairs = new Set();
 
-  // 読み込み時に保存されたメンバーとチーム人数を復元
+  // 読み込み時に保存されたデータを復元
   window.addEventListener('DOMContentLoaded', () => {
     const savedMembers = localStorage.getItem('saved_members_input');
     if (savedMembers !== null) {
@@ -130,6 +145,10 @@
     const savedTeamSize = localStorage.getItem('saved_team_size');
     if (savedTeamSize !== null) {
       document.getElementById('teamSizeInput').value = savedTeamSize;
+    }
+    const savedPairs = localStorage.getItem('saved_team_pairs');
+    if (savedPairs !== null) {
+      document.getElementById('teamPairSelect').value = savedPairs;
     }
   });
 
@@ -142,6 +161,11 @@
   document.getElementById('teamSizeInput').addEventListener('change', () => {
     const val = document.getElementById('teamSizeInput').value;
     localStorage.setItem('saved_team_size', val);
+  });
+
+  document.getElementById('teamPairSelect').addEventListener('change', () => {
+    const val = document.getElementById('teamPairSelect').value;
+    localStorage.setItem('saved_team_pairs', val);
   });
 
   function updateCount() {
@@ -159,6 +183,9 @@
   function generateTeams() {
     const members = getMemberList();
     const teamSize = parseInt(document.getElementById('teamSizeInput').value, 10) || 3;
+    const numPairs = parseInt(document.getElementById('teamPairSelect').value, 10) || 1;
+    const numTeams = numPairs * 2; // 組数 × 2 = 総チーム数
+
     const errorEl = document.getElementById('errorMessage');
     errorEl.innerText = '';
 
@@ -167,19 +194,11 @@
       return;
     }
 
-    const minRequired = teamSize * 2;
-    if (members.length < minRequired) {
-      errorEl.innerText = `メンバーが足りません（1チーム${teamSize}人で最低2チーム作れるよう、${minRequired}人以上入力してください）。`;
+    const requiredMembers = teamSize * numTeams;
+    if (members.length < requiredMembers) {
+      errorEl.innerText = `${numPairs}組（${numTeams}チーム × ${teamSize}人）を作成するには、最低${requiredMembers}人必要です。（現在: ${members.length}人）`;
       return;
     }
-
-    // 指定人数でのチーム数を計算し、必ず「偶数個」にする
-    let numTeams = Math.floor(members.length / teamSize);
-    if (numTeams % 2 !== 0) {
-      numTeams -= 1; // 奇数なら1減らして偶数にする
-    }
-
-    const totalTeamMembersCount = numTeams * teamSize;
 
     // 組み合わせ最適化（直前ペア回避）
     let bestTeams = null;
@@ -188,8 +207,8 @@
 
     for (let attempt = 0; attempt < 300; attempt++) {
       const shuffled = [...members].sort(() => Math.random() - 0.5);
-      const teamMembers = shuffled.slice(0, totalTeamMembersCount);
-      const leftovers = shuffled.slice(totalTeamMembersCount);
+      const teamMembers = shuffled.slice(0, requiredMembers);
+      const leftovers = shuffled.slice(requiredMembers);
 
       const teams = Array.from({ length: numTeams }, () => []);
       teamMembers.forEach((m, idx) => {
@@ -253,7 +272,8 @@
     teams.forEach((team, idx) => {
       const card = document.createElement('div');
       const isGov = (idx + 1) % 2 !== 0; // 奇数チーム: Government, 偶数チーム: Opposition
-      const teamName = isGov ? `Government ${Math.ceil((idx + 1) / 2)}` : `Opposition ${Math.ceil((idx + 1) / 2)}`;
+      const pairIndex = Math.ceil((idx + 1) / 2);
+      const teamName = isGov ? `Government ${pairIndex}` : `Opposition ${pairIndex}`;
       
       card.className = `team-card ${isGov ? 'gov' : 'opp'}`;
 
