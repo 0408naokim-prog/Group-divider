@@ -31,7 +31,7 @@
       margin-bottom: 16px;
     }
     h2 { font-size: 1rem; margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 6px; }
-    textarea, button {
+    textarea, input, button {
       width: 100%; padding: 10px; border-radius: 6px;
       border: 1px solid #ccc; box-sizing: border-box; font-size: 0.95rem;
     }
@@ -39,6 +39,17 @@
     button:hover { opacity: 0.9; }
     .btn-secondary { background: #95a5a6; }
     
+    .setting-group {
+      margin-top: 10px;
+    }
+    .setting-group label {
+      font-size: 0.9rem;
+      font-weight: bold;
+      color: #555;
+      display: block;
+      margin-bottom: 4px;
+    }
+
     .teams-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -56,7 +67,13 @@
     .team-members li { padding: 4px 0; font-size: 0.95rem; }
 
     .leftovers-card {
-      background: #fff3cd; border: 1px solid #ffeeba; border-radius: 8px; padding: 12px; margin-top: 12px;
+      background: #f0f4f8; border: 1px solid #d0d7de; border-radius: 8px; padding: 12px; margin-top: 12px;
+    }
+    .leftovers-card .title {
+      font-weight: bold;
+      color: #24292f;
+      margin-bottom: 4px;
+      font-size: 0.95rem;
     }
     .row { display: flex; gap: 8px; }
     .row > * { flex: 1; }
@@ -68,11 +85,16 @@
 <div class="container">
   <h1>🎲 自動チーム分けツール</h1>
 
-  <!-- メンバー入力 -->
+  <!-- メンバー入力＆設定 -->
   <div class="card">
     <h2>メンバー入力 (改行区切り)</h2>
     <textarea id="memberInput" rows="6" placeholder="メンバー名を改行区切りで入力..."></textarea>
     <div id="memberCount" style="text-align: right; font-size: 0.85rem; color: #666; margin-top: 4px;">現在の人数: 0人</div>
+    
+    <div class="setting-group">
+      <label for="teamSizeInput">1チームの人数</label>
+      <input type="number" id="teamSizeInput" value="3" min="1" max="20">
+    </div>
   </div>
 
   <!-- チーム分け実行 -->
@@ -87,7 +109,7 @@
       <button class="btn-secondary" onclick="copyResults()">📋 結果コピー</button>
     </div>
 
-    <!-- 余り・待機枠 -->
+    <!-- Judges枠 -->
     <div id="leftoversContainer"></div>
 
     <!-- チーム一覧 -->
@@ -98,10 +120,34 @@
 <script>
   let previousPairs = new Set();
 
+  // 読み込み時に保存されたメンバーとチーム人数を復元
+  window.addEventListener('DOMContentLoaded', () => {
+    const savedMembers = localStorage.getItem('saved_members_input');
+    if (savedMembers !== null) {
+      document.getElementById('memberInput').value = savedMembers;
+      updateCount();
+    }
+    const savedTeamSize = localStorage.getItem('saved_team_size');
+    if (savedTeamSize !== null) {
+      document.getElementById('teamSizeInput').value = savedTeamSize;
+    }
+  });
+
   document.getElementById('memberInput').addEventListener('input', () => {
+    const text = document.getElementById('memberInput').value;
+    localStorage.setItem('saved_members_input', text);
+    updateCount();
+  });
+
+  document.getElementById('teamSizeInput').addEventListener('change', () => {
+    const val = document.getElementById('teamSizeInput').value;
+    localStorage.setItem('saved_team_size', val);
+  });
+
+  function updateCount() {
     const members = getMemberList();
     document.getElementById('memberCount').innerText = `現在の人数: ${members.length}人`;
-  });
+  }
 
   function getMemberList() {
     return document.getElementById('memberInput').value
@@ -112,21 +158,28 @@
 
   function generateTeams() {
     const members = getMemberList();
+    const teamSize = parseInt(document.getElementById('teamSizeInput').value, 10) || 3;
     const errorEl = document.getElementById('errorMessage');
     errorEl.innerText = '';
 
-    if (members.length < 6) {
-      errorEl.innerText = 'メンバーが6人未満のため、3人×偶数チーム（最低2チーム=6人）が作成できません。';
+    if (teamSize < 1) {
+      errorEl.innerText = 'チーム人数は1人以上に設定してください。';
       return;
     }
 
-    // 3人チームを「偶数個」作る計算
-    let numTeams = Math.floor(members.length / 3);
+    const minRequired = teamSize * 2;
+    if (members.length < minRequired) {
+      errorEl.innerText = `メンバーが足りません（1チーム${teamSize}人で最低2チーム作れるよう、${minRequired}人以上入力してください）。`;
+      return;
+    }
+
+    // 指定人数でのチーム数を計算し、必ず「偶数個」にする
+    let numTeams = Math.floor(members.length / teamSize);
     if (numTeams % 2 !== 0) {
       numTeams -= 1; // 奇数なら1減らして偶数にする
     }
 
-    const totalTeamMembersCount = numTeams * 3;
+    const totalTeamMembersCount = numTeams * teamSize;
 
     // 組み合わせ最適化（直前ペア回避）
     let bestTeams = null;
@@ -188,11 +241,11 @@
     teamsDisplay.innerHTML = '';
     leftoversContainer.innerHTML = '';
 
-    // 余り・待機メンバーの表示
+    // Judgesメンバーの表示
     if (leftovers.length > 0) {
       const div = document.createElement('div');
       div.className = 'leftovers-card';
-      div.innerHTML = `<strong>⚠️ あまり (${leftovers.length}人):</strong> ${leftovers.join(', ')}`;
+      div.innerHTML = `<div class="title">⚖️ Judges (${leftovers.length}人)</div><div>${leftovers.join(', ')}</div>`;
       leftoversContainer.appendChild(div);
     }
 
@@ -228,7 +281,9 @@
 
     const leftovers = document.querySelector('.leftovers-card');
     if (leftovers) {
-      text += leftovers.innerText + "\n";
+      const title = leftovers.querySelector('.title').innerText;
+      const names = leftovers.querySelector('div:nth-child(2)').innerText;
+      text += `■ ${title}\n${names}\n`;
     }
 
     navigator.clipboard.writeText(text).then(() => {
